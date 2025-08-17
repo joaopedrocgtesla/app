@@ -13,7 +13,7 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'BLE com ESP32',
+      title: 'BLE com ESP32 ',
       theme: ThemeData(primarySwatch: Colors.blue),
       home: const BleHomePage(),
     );
