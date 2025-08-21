@@ -1,127 +1,99 @@
-import 'dart:async';
-import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
+import 'package:permission_handler/permission_handler.dart';
 
-const String SERVICE_UUID        = "4fafc201-1fb5-459e-8fcc-c5c9c331914b";
-const String CHARACTERISTIC_UUID = "beb5483e-36e1-4688-b7f5-ea07361b26a8";
-
-void main() => runApp(const MyApp());
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  runApp(MyApp());
+}
 
 class MyApp extends StatelessWidget {
-  const MyApp({super.key});
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'BLE com ESP32 ',
-      theme: ThemeData(primarySwatch: Colors.blue),
-      home: const BleHomePage(),
-    );
+    return MaterialApp(home: Scanner());
   }
 }
 
-class BleHomePage extends StatefulWidget {
-  const BleHomePage({super.key});
+class Scanner extends StatefulWidget {
+  const Scanner({super.key});
+
   @override
-  State<BleHomePage> createState() => _BleHomePageState();
+  State<Scanner> createState() => _ScannerState();
 }
 
-class _BleHomePageState extends State<BleHomePage> {
-  StreamSubscription? scanSubscription;
-  BluetoothDevice? connectedDevice;
-  BluetoothCharacteristic? targetCharacteristic;
-  List<ScanResult> scanResults = [];
-  String receivedData = '';
+class _ScannerState extends State<Scanner> {
+  final List<ScanResult> _recordList = [];
+
+  void requestPermissions() async {
+    PermissionStatus bl = await Permission.bluetoothConnect.request();
+    PermissionStatus loc = await Permission.location.request();
+
+    if (bl.isGranted && loc.isGranted) {
+      startScanning();
+    } else {}
+  }
+
+  void startScanning() async {
+    _recordList.clear();
+    await FlutterBluePlus.startScan(timeout: Duration(seconds: 5));
+    FlutterBluePlus.scanResults.listen((results) {
+      for (ScanResult result in results) {
+        if (!_recordList.contains(result)) {
+          _recordList.add(result);
+        }
+      }
+      setState(() {});
+    });
+  }
+
+  void connectToDevice(BluetoothDevice device) async {
+    FlutterBluePlus.stopScan();
+    await device.connect();
+  }
 
   @override
   void initState() {
     super.initState();
-    startScan();
-  }
-
-  @override
-  void dispose() {
-    scanSubscription?.cancel();
-    connectedDevice?.disconnect();
-    super.dispose();
-  }
-
-  void startScan() {
-    scanSubscription = FlutterBluePlus.scanResults.listen((scanResult) {
-      scanResult.map(
-              (e){
-            scanResults.add(e);
-          }
-      );
-    });
-  }
-
-  Future<void> connectToDevice(BluetoothDevice device) async {
-    await device.connect();
-    setState(() => connectedDevice = device);
-
-    List<BluetoothService> services = await device.discoverServices();
-    for (var service in services) {
-      if (service.uuid.toString() == SERVICE_UUID) {
-        for (var char in service.characteristics) {
-          if (char.uuid.toString() == CHARACTERISTIC_UUID) {
-            targetCharacteristic = char;
-            if (char.properties.notify) {
-              await char.setNotifyValue(true);
-              char.value.listen((value) {
-                setState(() {
-                  receivedData = String.fromCharCodes(value);
-                });
-              });
-            }
-          }
-        }
-      }
-    }
-  }
-
-  Future<void> sendData(String text) async {
-    if (targetCharacteristic != null && targetCharacteristic!.properties.write) {
-      Uint8List bytes = Uint8List.fromList(text.codeUnits);
-      await targetCharacteristic!.write(bytes, withoutResponse: false);
-    }
+    requestPermissions();
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('BLE com ESP32')),
-      body: Padding(
-        padding: const EdgeInsets.all(16),
+      appBar: AppBar(title: Text("BLE Scanner"), centerTitle: true),
+      body: SingleChildScrollView(
+        physics: ScrollPhysics(),
         child: Column(
           children: [
-            const Text('Dispositivos encontrados:'),
-            Expanded(
-              child: ListView.builder(
-                itemCount: scanResults.length,
-                itemBuilder: (_, i) {
-                  final r = scanResults[i];
-                  return ListTile(
-                    title: Text(r.device.name),
-                    subtitle: Text(r.device.id.toString()),
-                    trailing: ElevatedButton(
-                      onPressed: () => connectToDevice(r.device),
-                      child: const Text('Conectar'),
-                    ),
-                  );
-                },
-              ),
+            ListView.builder(
+              shrinkWrap: true,
+              itemCount: _recordList.length,
+              itemBuilder: (context, index) {
+                return Container(
+                  height: 52,
+                  width: double.infinity,
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.start,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Text(
+                            _recordList[index].device.advName.length > 0
+                                ? _recordList[index].device.advName
+                                : "Unknown Device",
+                          ),
+                          Text(_recordList[index].rssi.toString()),
+                        ],
+                      ),
+                      Text(_recordList[index].device.remoteId.str),
+                    ],
+                  ),
+                );
+              },
             ),
-            const SizedBox(height: 20),
-            if (connectedDevice != null) ...[
-              Text('Conectado: ${connectedDevice!.name}'),
-              ElevatedButton(
-                onPressed: () => sendData("Olá, ESP32!"),
-                child: const Text('Enviar mensagem'),
-              ),
-              const SizedBox(height: 10),
-              Text('Recebido: $receivedData'),
-            ],
+            TextButton(onPressed: startScanning, child: Text("Rescan")),
           ],
         ),
       ),
